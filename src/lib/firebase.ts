@@ -1,10 +1,21 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
 import { getFirestore } from 'firebase/firestore';
-import firebaseConfig from '../../firebase-applet-config.json';
+import { getAnalytics } from 'firebase/analytics';
+
+const firebaseConfig = {
+  apiKey: "AIzaSyCvW50t4myB5C9n3vxW_qlw1A1c71MatPI",
+  authDomain: "reading-e335b.firebaseapp.com",
+  projectId: "reading-e335b",
+  storageBucket: "reading-e335b.firebasestorage.app",
+  messagingSenderId: "543925831433",
+  appId: "1:543925831433:web:c36f06b422db71571f75d8",
+  measurementId: "G-YZGTGNKZV8"
+};
 
 const app = initializeApp(firebaseConfig);
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+export const analytics = getAnalytics(app);
+export const db = getFirestore(app);
 export const auth = getAuth(app);
 
 export enum OperationType {
