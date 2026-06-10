@@ -25,13 +25,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    let unsubscribeProfile: (() => void) | undefined;
+
     const unsubscribeAuth = onAuthStateChanged(auth, async (user) => {
       setUser(user);
       
+      if (unsubscribeProfile) {
+        unsubscribeProfile();
+        unsubscribeProfile = undefined;
+      }
+
       if (user) {
         // Listen for profile changes
         const userRef = doc(db, 'users', user.uid);
-        const unsubscribeProfile = onSnapshot(userRef, async (snapshot) => {
+        unsubscribeProfile = onSnapshot(userRef, async (snapshot) => {
           if (snapshot.exists()) {
             setProfile(snapshot.data() as UserProfile);
           } else {
@@ -61,18 +68,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           }
           setLoading(false);
         }, (error) => {
+          // Ignore permission denied errors that occur immediately after sign out
+          if (error.code === 'permission-denied' && !auth.currentUser) {
+            return;
+          }
           handleFirestoreError(error, OperationType.GET, `users/${user.uid}`);
           setLoading(false);
         });
-
-        return () => unsubscribeProfile();
       } else {
         setProfile(null);
         setLoading(false);
       }
     });
 
-    return () => unsubscribeAuth();
+    return () => {
+      unsubscribeAuth();
+      if (unsubscribeProfile) {
+        unsubscribeProfile();
+      }
+    };
   }, []);
 
   const isAdmin = profile?.role === 'admin';
