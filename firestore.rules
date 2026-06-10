@@ -1,0 +1,140 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // -------------------------------------------------------------------------
+    // 0. Global Safety Net
+    // -------------------------------------------------------------------------
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // -------------------------------------------------------------------------
+    // 1. Primitive Global Helpers
+    // -------------------------------------------------------------------------
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      // Bootstrapped admin check
+      return isSignedIn() && (
+        request.auth.token.email == '1onechoiz3@gmail.com' ||
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // -------------------------------------------------------------------------
+    // 2. Entity Validations
+    // -------------------------------------------------------------------------
+    
+    function isValidUser(data) {
+      return data.userId is string && data.userId.size() <= 128 &&
+             data.email is string && data.email.size() <= 256 &&
+             data.role in ['user', 'admin'] &&
+             (data.credits is int || data.credits is float) && data.credits >= 0 &&
+             data.createdAt is timestamp &&
+             data.updatedAt is timestamp;
+    }
+
+    function isValidCreditRequest(data) {
+      return data.userId is string && data.userId.size() <= 128 &&
+             data.userEmail is string && data.userEmail.size() <= 256 &&
+             data.amount is int && data.amount > 0 &&
+             data.status in ['pending', 'approved', 'rejected'] &&
+             data.createdAt is timestamp;
+    }
+
+    function isValidRedeemKey(data) {
+      return data.key is string && data.key.size() <= 64 &&
+             data.value is int && data.value > 0 &&
+             data.used is bool &&
+             data.createdAt is timestamp;
+    }
+
+    // -------------------------------------------------------------------------
+    // 3. Collection Rules
+    // -------------------------------------------------------------------------
+
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow list: if isAdmin();
+      
+      allow create: if isSignedIn() && 
+                      request.auth.uid == userId && 
+                      (
+                        (incoming().role == 'user' && incoming().credits == 0) ||
+                        (incoming().role == 'admin' && request.auth.token.email == '1onechoiz3@gmail.com')
+                      ) &&
+                      incoming().createdAt == request.time &&
+                      incoming().updatedAt == request.time;
+
+      allow update: if (isOwner(userId) || isAdmin()) && 
+                      incoming().updatedAt == request.time &&
+                      (incoming().role == existing().role || isAdmin());
+    }
+
+    match /requests/{requestId} {
+      allow get: if isSignedIn() && (isOwner(existing().userId) || isAdmin());
+      allow list: if isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid);
+      
+      allow create: if isSignedIn() && 
+                      isValidCreditRequest(incoming()) &&
+                      incoming().userId == request.auth.uid &&
+                      incoming().status == 'pending' &&
+                      incoming().createdAt == request.time;
+      
+      allow update: if isAdmin() && 
+                      isValidCreditRequest(incoming()) &&
+                      incoming().userId == existing().userId &&
+                      incoming().createdAt == existing().createdAt &&
+                      incoming().diff(existing()).affectedKeys().hasOnly(['status']);
+    }
+
+    match /keys/{keyId} {
+      allow get: if isSignedIn(); // Users can check if a key is valid
+      allow list: if isAdmin();
+      
+      allow create: if isAdmin() && 
+                      isValidRedeemKey(incoming()) &&
+                      incoming().createdAt == request.time;
+      
+      allow update: if (isSignedIn() && 
+                      !existing().used &&
+                      incoming().used == true &&
+                      incoming().usedBy == request.auth.uid &&
+                      incoming().key == existing().key &&
+                      incoming().value == existing().value &&
+                      incoming().createdAt == existing().createdAt &&
+                      incoming().diff(existing()).affectedKeys().hasOnly(['used', 'usedBy'])) ||
+                      isAdmin();
+    }
+
+    match /customTasks/{taskId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+    
+    // Admin list for multi-admin support (optional but recommended)
+    match /admins/{adminId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+  }
+}
